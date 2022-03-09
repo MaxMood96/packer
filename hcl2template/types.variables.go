@@ -275,18 +275,8 @@ var localBlockSchema = &hcl.BodySchema{
 	},
 }
 
-func decodeLocalBlock(block *hcl.Block, locals []*LocalBlock) (*LocalBlock, hcl.Diagnostics) {
+func decodeLocalBlock(block *hcl.Block) (*LocalBlock, hcl.Diagnostics) {
 	name := block.Labels[0]
-	for _, loc := range locals {
-		if loc.Name == name {
-			return nil, []*hcl.Diagnostic{{
-				Severity: hcl.DiagError,
-				Summary:  "Duplicate variable",
-				Detail:   "Duplicate " + block.Labels[0] + " variable definition found.",
-				Context:  block.DefRange.Ptr(),
-			}}
-		}
-	}
 
 	content, diags := block.Body.Content(localBlockSchema)
 	if !hclsyntax.ValidIdentifier(name) {
@@ -345,6 +335,7 @@ func (variables *Variables) decodeVariableBlock(block *hcl.Block, ectx *hcl.Eval
 	v := &Variable{
 		Name:  name,
 		Range: block.DefRange,
+		Type:  cty.DynamicPseudoType,
 	}
 
 	if attr, exists := content.Attributes["description"]; exists {
@@ -396,7 +387,9 @@ func (variables *Variables) decodeVariableBlock(block *hcl.Block, ectx *hcl.Eval
 
 		// It's possible no type attribute was assigned so lets make sure we
 		// have a valid type otherwise there could be issues parsing the value.
-		if v.Type == cty.NilType {
+		if v.Type == cty.DynamicPseudoType &&
+			!defaultValue.Type().Equals(cty.EmptyObject) &&
+			!defaultValue.Type().Equals(cty.EmptyTuple) {
 			v.Type = defaultValue.Type()
 		}
 	}
@@ -762,7 +755,7 @@ func (cfg *PackerConfig) collectInputVariableValues(env []string, files []*hcl.F
 // The specified filename is to identify the source of where value originated from in the diagnostics report, if there is an error.
 func expressionFromVariableDefinition(filename string, value string, variableType cty.Type) (hclsyntax.Expression, hcl.Diagnostics) {
 	switch variableType {
-	case cty.String, cty.Number, cty.NilType:
+	case cty.String, cty.Number, cty.NilType, cty.DynamicPseudoType:
 		// when the type is nil (not set in a variable block) we default to
 		// interpreting everything as a string literal.
 		return &hclsyntax.LiteralValueExpr{Val: cty.StringVal(value)}, nil

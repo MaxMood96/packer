@@ -1,12 +1,11 @@
 # Packer
 
-[![Build Status][circleci-badge]][circleci]
+[![Build Status](https://github.com/hashicorp/packer/actions/workflows/build.yml/badge.svg)](https://github.com/hashicorp/packer/actions/workflows/build.yml)
 [![Discuss](https://img.shields.io/badge/discuss-packer-3d89ff?style=flat)](https://discuss.hashicorp.com/c/packer)
 [![PkgGoDev](https://pkg.go.dev/badge/github.com/hashicorp/packer)](https://pkg.go.dev/github.com/hashicorp/packer)
 [![GoReportCard][report-badge]][report]
 
-[circleci-badge]: https://circleci.com/gh/hashicorp/packer.svg?style=svg
-[circleci]: https://app.circleci.com/pipelines/github/hashicorp/packer
+[github-badge]: https://github.com/hashicorp/packer/actions/workflows/build.yml/badge.svg
 [appveyor-badge]: https://ci.appveyor.com/api/projects/status/miavlgnp989e5obc/branch/master?svg=true
 [godoc-badge]: https://godoc.org/github.com/hashicorp/packer?status.svg
 [godoc]: https://godoc.org/github.com/hashicorp/packer
@@ -35,7 +34,7 @@ The images that Packer creates can easily be turned into
 ## Quick Start
 
 **Note:** There is a great
-[introduction and getting started guide](https://www.packer.io/intro)
+[introduction and getting started guide](https://learn.hashicorp.com/tutorials/packer/get-started-install-cli)
 for those with a bit more patience. Otherwise, the quick start below
 will get you up and running quickly, at the sacrifice of not explaining some
 key points.

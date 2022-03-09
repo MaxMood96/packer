@@ -177,42 +177,29 @@ func (c *PackerConfig) decodeInputVariables(f *hcl.File) hcl.Diagnostics {
 	return diags
 }
 
-// parseLocalVariables looks in the found blocks for 'locals' blocks. It
-// should be called after parsing input variables so that they can be
-// referenced.
-func (c *PackerConfig) parseLocalVariables(f *hcl.File) ([]*LocalBlock, hcl.Diagnostics) {
+// parseLocalVariableBlocks looks in the AST for 'local' and 'locals' blocks and
+// returns them all.
+func parseLocalVariableBlocks(f *hcl.File) ([]*LocalBlock, hcl.Diagnostics) {
 	var diags hcl.Diagnostics
 
 	content, moreDiags := f.Body.Content(configSchema)
 	diags = append(diags, moreDiags...)
 
-	locals := c.LocalBlocks
+	var locals []*LocalBlock
 
 	for _, block := range content.Blocks {
 		switch block.Type {
 		case localLabel:
-			l, moreDiags := decodeLocalBlock(block, locals)
+			block, moreDiags := decodeLocalBlock(block)
 			diags = append(diags, moreDiags...)
-			if l != nil {
-				locals = append(locals, l)
-			}
 			if moreDiags.HasErrors() {
 				return locals, diags
 			}
+			locals = append(locals, block)
 		case localsLabel:
 			attrs, moreDiags := block.Body.JustAttributes()
 			diags = append(diags, moreDiags...)
 			for name, attr := range attrs {
-				if _, found := c.LocalVariables[name]; found {
-					diags = append(diags, &hcl.Diagnostic{
-						Severity: hcl.DiagError,
-						Summary:  "Duplicate value in " + localsLabel,
-						Detail:   "Duplicate " + name + " definition found.",
-						Subject:  attr.NameRange.Ptr(),
-						Context:  block.DefRange.Ptr(),
-					})
-					return locals, diags
-				}
 				locals = append(locals, &LocalBlock{
 					Name: name,
 					Expr: attr.Expr,
@@ -221,52 +208,76 @@ func (c *PackerConfig) parseLocalVariables(f *hcl.File) ([]*LocalBlock, hcl.Diag
 		}
 	}
 
-	c.LocalBlocks = locals
 	return locals, diags
 }
 
-func (c *PackerConfig) evaluateLocalVariables(locals []*LocalBlock) hcl.Diagnostics {
+func (c *PackerConfig) evaluateAllLocalVariables(locals []*LocalBlock) hcl.Diagnostics {
 	var diags hcl.Diagnostics
 
-	if len(locals) > 0 && c.LocalVariables == nil {
-		c.LocalVariables = Variables{}
-	}
-
-	var retry, previousL int
-	for len(locals) > 0 {
-		local := locals[0]
-		moreDiags := c.evaluateLocalVariable(local)
-		if moreDiags.HasErrors() {
-			if len(locals) == 1 {
-				// If this is the only local left there's no need
-				// to try evaluating again
-				return append(diags, moreDiags...)
-			}
-			if previousL == len(locals) {
-				if retry == 100 {
-					// To get to this point, locals must have a circle dependency
-					return append(diags, moreDiags...)
-				}
-				retry++
-			}
-			previousL = len(locals)
-
-			// If local uses another local that has not been evaluated yet this could be the reason of errors
-			// Push local to the end of slice to be evaluated later
-			locals = append(locals, local)
-		} else {
-			retry = 0
-			diags = append(diags, moreDiags...)
-		}
-		// Remove local from slice
-		locals = append(locals[:0], locals[1:]...)
+	for _, local := range locals {
+		diags = append(diags, c.evaluateLocalVariable(local)...)
 	}
 
 	return diags
 }
 
+func (c *PackerConfig) evaluateLocalVariables(locals []*LocalBlock) hcl.Diagnostics {
+	var diags hcl.Diagnostics
+
+	if len(locals) == 0 {
+		return diags
+	}
+
+	if c.LocalVariables == nil {
+		c.LocalVariables = Variables{}
+	}
+
+	for foundSomething := true; foundSomething; {
+		foundSomething = false
+		for i := 0; i < len(locals); {
+			local := locals[i]
+			moreDiags := c.evaluateLocalVariable(local)
+			if moreDiags.HasErrors() {
+				i++
+				continue
+			}
+			foundSomething = true
+			locals = append(locals[:i], locals[i+1:]...)
+		}
+	}
+
+	if len(locals) != 0 {
+		// get errors from remaining variables
+		return c.evaluateAllLocalVariables(locals)
+	}
+
+	return diags
+}
+
+func checkForDuplicateLocalDefinition(locals []*LocalBlock) hcl.Diagnostics {
+	var diags hcl.Diagnostics
+
+	// we could sort by name and then check contiguous names to use less memory,
+	// but using a map sounds good enough.
+	names := map[string]struct{}{}
+	for _, local := range locals {
+		if _, found := names[local.Name]; found {
+			diags = append(diags, &hcl.Diagnostic{
+				Severity: hcl.DiagError,
+				Summary:  "Duplicate local definition",
+				Detail:   "Duplicate " + local.Name + " definition found.",
+				Subject:  local.Expr.Range().Ptr(),
+			})
+			continue
+		}
+		names[local.Name] = struct{}{}
+	}
+	return diags
+}
+
 func (c *PackerConfig) evaluateLocalVariable(local *LocalBlock) hcl.Diagnostics {
 	var diags hcl.Diagnostics
+
 	value, moreDiags := local.Expr.Value(c.EvalContext(LocalContext, nil))
 	diags = append(diags, moreDiags...)
 	if moreDiags.HasErrors() {
@@ -586,6 +597,10 @@ func (cfg *PackerConfig) GetBuilds(opts packer.GetBuildsOptions) ([]packersdk.Bu
 				BuildName: build.Name,
 				Type:      srcUsage.String(),
 			}
+
+			pcb.SetDebug(cfg.debug)
+			pcb.SetForce(cfg.force)
+			pcb.SetOnError(cfg.onError)
 
 			// Apply the -only and -except command-line options to exclude matching builds.
 			buildName := pcb.Name()
